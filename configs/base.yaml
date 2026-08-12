@@ -1,0 +1,86 @@
+# RiskFormer Base Configuration
+# This file establishes default hyperparameters and settings.
+# Override via command-line or environment variables.
+
+# Data configuration
+data:
+  assets: ["SPY", "QQQ", "IWM"]  # Placeholder assets
+  features:
+    - close
+    - volume
+    - returns_log
+    - volatility_20
+    - returns_ma_5
+  lookback_window: 60  # Historical context length (days)
+  forecast_horizon: 1  # Predict 1 day ahead
+  train_start_date: "2015-01-01"
+  train_end_date: "2021-12-31"
+  val_start_date: "2022-01-01"
+  val_end_date: "2022-12-31"
+  test_start_date: "2023-01-01"
+  test_end_date: "2023-12-31"
+
+# Normalization (applied only on training data, propagated forward)
+normalization:
+  method: "zscore"  # zscore or minmax
+  epsilon: 1.0e-8
+
+# Embedding configuration
+embeddings:
+  temporal_dim: 32
+  asset_dim: 16
+  feature_dim: 64
+
+# Transformer backbone
+transformer:
+  d_model: 256
+  n_heads: 8
+  n_layers: 4
+  d_ff: 512
+  dropout: 0.1
+  activation: "relu"
+  causal: true
+
+# Prediction heads
+heads:
+  return_prediction: true
+  volatility_prediction: true
+  quantile_regression: true
+  regime_classification: false
+
+# Training
+training:
+  batch_size: 32
+  learning_rate: 1.0e-3
+  optimizer: "adam"
+  max_epochs: 50
+  weight_decay: 1.0e-4
+  early_stopping_patience: 5
+
+# Loss weights (for multi-task learning)
+losses:
+  return_weight: 1.0
+  volatility_weight: 0.5
+  quantile_weight: 0.5
+  regime_weight: 0.0
+
+# Evaluation
+evaluation:
+  walk_forward_steps: 10
+  metrics:
+    - mae
+    - rmse
+    - directional_accuracy
+    - correlation
+
+# Backtesting (future phase)
+backtesting:
+  initial_capital: 100000.0
+  transaction_cost: 0.001  # 10 bps
+  rebalance_frequency: "daily"
+
+# System
+system:
+  device: "cpu"  # cpu or cuda (cpu-first development)
+  seed: 42
+  num_workers: 0

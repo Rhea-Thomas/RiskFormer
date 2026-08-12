@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "riskformer"
+version = "0.1.0"
+description = "RiskFormer: Advanced financial time-series intelligence with Transformers"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    {name = "Thomas", email = "thomas.rh@northeastern.edu"}
+]
+license = {text = "MIT"}
+
+dependencies = [
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+    "torch>=2.0.0",
+    "scikit-learn>=1.3.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+]
+
+test = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
