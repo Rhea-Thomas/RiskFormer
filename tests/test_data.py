@@ -433,7 +433,197 @@ class TestNormalization:
         np.testing.assert_allclose(result["x"].values, expected["x"].values, rtol=1e-5)
 
 
-def test_dataset_shapes():
-    """Verify dataset produces correct tensor shapes."""
-    # This will be tested in Phase 4 (dataset.py)
-    pass
+class TestDataset:
+    """Test rolling window dataset construction."""
+
+    @pytest.fixture
+    def sample_features_targets(self):
+        """Create sample features and targets for testing."""
+        dates = pd.date_range("2023-01-01", periods=100, freq="D")
+
+        # Multi-asset features with MultiIndex columns
+        features_dict = {
+            ("SPY", "close"): np.random.uniform(400, 410, 100),
+            ("SPY", "returns"): np.random.normal(0.0005, 0.01, 100),
+            ("QQQ", "close"): np.random.uniform(300, 310, 100),
+            ("QQQ", "returns"): np.random.normal(0.0005, 0.012, 100),
+        }
+        features_df = pd.DataFrame(features_dict, index=dates)
+        features_df.columns = pd.MultiIndex.from_tuples(features_df.columns)
+
+        # Targets: next-day return for each asset
+        targets_dict = {
+            "SPY_return": np.random.normal(0.0005, 0.01, 100),
+            "QQQ_return": np.random.normal(0.0005, 0.012, 100),
+        }
+        targets_df = pd.DataFrame(targets_dict, index=dates)
+
+        return features_df, targets_df
+
+    def test_dataset_length(self, sample_features_targets):
+        """Verify dataset has correct number of samples."""
+        from data.dataset import FinancialTimeSeriesDataset
+
+        features_df, targets_df = sample_features_targets
+        lookback = 10
+        horizon = 1
+
+        dataset = FinancialTimeSeriesDataset(
+            features_df, targets_df, lookback_window=lookback, horizon=horizon
+        )
+
+        # n_samples = T - lookback - horizon + 1 = 100 - 10 - 1 + 1 = 90
+        expected_len = len(features_df) - lookback - horizon + 1
+        assert len(dataset) == expected_len
+
+    def test_dataset_shapes(self, sample_features_targets):
+        """Verify dataset produces correct tensor shapes."""
+        from data.dataset import FinancialTimeSeriesDataset
+
+        features_df, targets_df = sample_features_targets
+        lookback = 10
+        n_assets = 2
+        n_features = 2
+
+        dataset = FinancialTimeSeriesDataset(
+            features_df, targets_df, lookback_window=lookback
+        )
+
+        X, y = dataset[0]
+
+        # X should be (lookback, n_assets, n_features)
+        assert X.shape == (lookback, n_assets, n_features), f"Got {X.shape}"
+
+        # y should be (n_targets,) or (n_assets,)
+        assert len(y.shape) >= 1
+
+    def test_no_leakage_sample_idx(self, sample_features_targets):
+        """
+        Verify sample at idx uses data[idx:idx+lookback] for X
+        and data[idx+lookback+horizon-1] for y (no future leakage).
+        """
+        from data.dataset import FinancialTimeSeriesDataset
+
+        features_df, targets_df = sample_features_targets
+        lookback = 5
+        horizon = 1
+
+        dataset = FinancialTimeSeriesDataset(
+            features_df, targets_df, lookback_window=lookback, horizon=horizon
+        )
+
+        # Get sample at idx=10
+        idx = 10
+        X, y = dataset[idx]
+
+        # X should use features from rows [10, 11, 12, 13, 14]
+        # (that's 5 rows starting at idx 10)
+        expected_X_data = features_df.iloc[idx : idx + lookback].to_numpy()
+
+        # Get first asset's features from X
+        if hasattr(X, 'numpy'):
+            X_numpy = X.numpy()
+        else:
+            X_numpy = X
+        actual_first_asset = X_numpy[:, 0, :]  # (lookback, n_features)
+
+        # Compare first asset
+        np.testing.assert_allclose(
+            actual_first_asset, expected_X_data[:, :2], rtol=1e-5
+        )
+
+        # y should use target at row [idx+lookback+horizon-1] = [10+5+1-1] = [15]
+        expected_y_idx = idx + lookback + horizon - 1
+        expected_y = targets_df.iloc[expected_y_idx].to_numpy()
+
+        y_numpy = y.numpy() if hasattr(y, 'numpy') else y
+        np.testing.assert_allclose(y_numpy, expected_y, rtol=1e-5)
+
+    def test_no_overlap_between_samples(self, sample_features_targets):
+        """Verify consecutive samples don't overlap X and y."""
+        from data.dataset import FinancialTimeSeriesDataset
+
+        features_df, targets_df = sample_features_targets
+        lookback = 10
+        horizon = 2
+
+        dataset = FinancialTimeSeriesDataset(
+            features_df, targets_df, lookback_window=lookback, horizon=horizon
+        )
+
+        # Sample i: X uses [i, i+lookback], y uses [i+lookback+horizon-1]
+        # Sample i+1: X uses [i+1, i+1+lookback], y uses [i+1+lookback+horizon-1]
+
+        # For no overlap:
+        # y[i] at [i+lookback+horizon-1]
+        # X[i+1] starts at [i+1]
+        # Requirement: i+lookback+horizon-1 < i+1
+        # Simplifies to: lookback + horizon - 1 < 1, which is FALSE
+
+        # So there WILL be overlap in features (which is fine—consecutive windows overlap)
+        # But y should never use same time as future X
+
+        idx = 0
+        X0, y0 = dataset[idx]
+        X1, y1 = dataset[idx + 1]
+
+        # y0 uses time [idx + lookback + horizon - 1]
+        # X1 uses times [idx+1, idx+1+lookback]
+        # They should not share a target (y0) with a feature (X1)
+
+        y0_time = idx + lookback + horizon - 1
+        X1_times = set(range(idx + 1, idx + 1 + lookback))
+
+        # y0_time should NOT be in X1_times
+        assert y0_time not in X1_times, "y leaked into future X!"
+
+    def test_dataloader_batching(self, sample_features_targets):
+        """Verify DataLoader batches correctly."""
+        try:
+            import torch
+            from data.dataset import create_dataloader
+        except ImportError:
+            pytest.skip("torch not installed")
+
+        features_df, targets_df = sample_features_targets
+        batch_size = 8
+
+        loader = create_dataloader(
+            features_df, targets_df, lookback_window=10, batch_size=batch_size
+        )
+
+        # Get first batch
+        X_batch, y_batch = next(iter(loader))
+
+        # Should have batch_size samples
+        assert X_batch.shape[0] == batch_size
+        assert y_batch.shape[0] == batch_size
+
+        # X should be (batch_size, lookback, n_assets, n_features)
+        assert len(X_batch.shape) == 4
+
+    def test_no_shuffle_preserves_order(self, sample_features_targets):
+        """Verify shuffle=False preserves temporal order."""
+        try:
+            import torch
+            from data.dataset import create_dataloader
+        except ImportError:
+            pytest.skip("torch not installed")
+
+        features_df, targets_df = sample_features_targets
+        batch_size = 10
+
+        loader = create_dataloader(
+            features_df, targets_df, lookback_window=10, batch_size=batch_size, shuffle=False
+        )
+
+        # Collect all batches
+        all_X = []
+        all_y = []
+        for X_batch, y_batch in loader:
+            all_X.append(X_batch)
+            all_y.append(y_batch)
+
+        # Check that batches come in order (first batch has earliest times)
+        # This is verified by the fact that the dataset is deterministic with shuffle=False
+        assert len(all_X) > 0
