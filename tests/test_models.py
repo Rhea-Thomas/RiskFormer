@@ -430,3 +430,194 @@ class TestBackbone:
 
         except ImportError:
             pytest.skip("torch not installed")
+
+
+class TestHeads:
+    """Test prediction heads."""
+
+    def test_price_head_shape(self):
+        """Test price head output shape."""
+        try:
+            import torch
+            from models.heads import PriceHead
+
+            d_model = 256
+            n_outputs = 1
+            batch_size = 4
+            seq_len = 20
+
+            head = PriceHead(d_model, n_outputs)
+            X = torch.randn(batch_size, seq_len, d_model)
+            output = head(X)
+
+            assert output.shape == (batch_size, seq_len, n_outputs)
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_price_head_quantiles(self):
+        """Test price head with multiple quantile outputs."""
+        try:
+            import torch
+            from models.heads import PriceHead
+
+            d_model = 256
+            n_quantiles = 3
+            head = PriceHead(d_model, n_outputs=n_quantiles)
+
+            X = torch.randn(2, 10, d_model)
+            output = head(X)
+
+            assert output.shape == (2, 10, n_quantiles)
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_volatility_head_shape(self):
+        """Test volatility head output shape."""
+        try:
+            import torch
+            from models.heads import VolatilityHead
+
+            d_model = 256
+            batch_size = 4
+            seq_len = 20
+
+            head = VolatilityHead(d_model)
+            X = torch.randn(batch_size, seq_len, d_model)
+            output = head(X)
+
+            assert output.shape == (batch_size, seq_len, 1)
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_volatility_head_positive(self):
+        """Verify volatility head outputs are positive."""
+        try:
+            import torch
+            from models.heads import VolatilityHead
+
+            d_model = 256
+            head = VolatilityHead(d_model)
+
+            X = torch.randn(1, 10, d_model)
+            output = head(X)
+
+            # Softplus ensures positive output
+            assert (output > 0).all()
+            assert not torch.isnan(output).any()
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_direction_head_shape(self):
+        """Test direction head output shape."""
+        try:
+            import torch
+            from models.heads import DirectionHead
+
+            d_model = 256
+            batch_size = 4
+            seq_len = 20
+
+            head = DirectionHead(d_model)
+            X = torch.randn(batch_size, seq_len, d_model)
+            output = head(X)
+
+            assert output.shape == (batch_size, seq_len, 1)
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_direction_head_probability(self):
+        """Verify direction head outputs are in [0, 1]."""
+        try:
+            import torch
+            from models.heads import DirectionHead
+
+            d_model = 256
+            head = DirectionHead(d_model)
+
+            X = torch.randn(1, 10, d_model)
+            output = head(X)
+
+            # Sigmoid ensures output in [0, 1]
+            assert (output >= 0).all() and (output <= 1).all()
+            assert not torch.isnan(output).any()
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_multitask_head_shape(self):
+        """Test multi-task head output shapes."""
+        try:
+            import torch
+            from models.heads import MultiTaskHead
+
+            d_model = 256
+            n_price_outputs = 1
+            batch_size = 4
+            seq_len = 20
+
+            head = MultiTaskHead(d_model, n_price_outputs)
+            X = torch.randn(batch_size, seq_len, d_model)
+            outputs = head(X)
+
+            # Check all outputs are present
+            assert 'price' in outputs
+            assert 'volatility' in outputs
+            assert 'direction' in outputs
+
+            # Check shapes
+            assert outputs['price'].shape == (batch_size, seq_len, n_price_outputs)
+            assert outputs['volatility'].shape == (batch_size, seq_len, 1)
+            assert outputs['direction'].shape == (batch_size, seq_len, 1)
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_multitask_head_numerical(self):
+        """Verify multi-task head produces valid predictions."""
+        try:
+            import torch
+            from models.heads import MultiTaskHead
+
+            d_model = 256
+            head = MultiTaskHead(d_model)
+
+            X = torch.randn(2, 10, d_model)
+            outputs = head(X)
+
+            # Price: any value
+            assert not torch.isnan(outputs['price']).any()
+
+            # Volatility: positive
+            assert (outputs['volatility'] > 0).all()
+            assert not torch.isnan(outputs['volatility']).any()
+
+            # Direction: in [0, 1]
+            assert (outputs['direction'] >= 0).all()
+            assert (outputs['direction'] <= 1).all()
+            assert not torch.isnan(outputs['direction']).any()
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_multitask_head_quantiles(self):
+        """Test multi-task head with quantile price outputs."""
+        try:
+            import torch
+            from models.heads import MultiTaskHead
+
+            d_model = 256
+            n_quantiles = 3
+            head = MultiTaskHead(d_model, n_price_outputs=n_quantiles)
+
+            X = torch.randn(2, 10, d_model)
+            outputs = head(X)
+
+            assert outputs['price'].shape == (2, 10, n_quantiles)
+
+        except ImportError:
+            pytest.skip("torch not installed")
