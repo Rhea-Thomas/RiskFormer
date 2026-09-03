@@ -117,9 +117,172 @@ class TestDataIngestion:
         assert all(v == "OK" for v in report.values())
 
 
+class TestCleaning:
+    """Test data cleaning module."""
+
+    @pytest.fixture
+    def data_with_missing(self):
+        """Create data with missing values."""
+        dates = pd.date_range("2023-01-01", periods=20, freq="D")
+        data = pd.DataFrame(
+            {
+                "Open": np.random.uniform(100, 110, 20),
+                "Close": np.random.uniform(100, 110, 20),
+                "Volume": np.random.uniform(1e6, 2e6, 20),
+            },
+            index=dates,
+        )
+        # Introduce missing values
+        data.loc[data.index[5], "Close"] = np.nan
+        data.loc[data.index[10], "Volume"] = np.nan
+        return data
+
+    def test_forward_fill(self, data_with_missing):
+        """Test forward fill handles missing values."""
+        from data.cleaning import handle_missing_values
+
+        cleaned = handle_missing_values(data_with_missing, method="forward_fill")
+        assert not cleaned.isnull().any().any()
+
+    def test_detect_outliers(self):
+        """Test outlier detection."""
+        from data.cleaning import detect_outliers
+
+        dates = pd.date_range("2023-01-01", periods=20, freq="D")
+        prices = np.ones(20) * 100
+        prices[5] = 150  # 50% jump
+        data = pd.DataFrame(
+            {
+                "Close": prices,
+                "Volume": np.ones(20) * 1e6,
+            },
+            index=dates,
+        )
+
+        anomalies = detect_outliers(data, price_change_threshold=0.20)
+        assert len(anomalies) > 0
+        assert "Extreme price move" in anomalies.iloc[0]["Reason"]
+
+
+class TestFeatures:
+    """Test feature engineering module."""
+
+    @pytest.fixture
+    def simple_price_series(self):
+        """Create simple price series for testing."""
+        dates = pd.date_range("2023-01-01", periods=50, freq="D")
+        # Linear increase: 100, 101, 102, ...
+        prices = pd.Series(100 + np.arange(50), index=dates)
+        return prices
+
+    def test_returns_computation(self, simple_price_series):
+        """Test returns computation."""
+        from data.features import compute_returns
+
+        returns = compute_returns(simple_price_series, method="simple")
+
+        # For linear increase (100, 101, 102, ...), check first return
+        # First return: (101 - 100) / 100 = 0.01
+        expected_first_return = 0.01
+        actual_first_return = returns.iloc[1]
+        np.testing.assert_allclose(actual_first_return, expected_first_return)
+
+        # Verify returns are positive and decreasing (as prices compound)
+        actual_returns = returns.dropna()
+        assert (actual_returns > 0).all()
+        assert (np.diff(actual_returns) < 0).all()  # Decreasing
+
+    def test_no_leakage_moving_average(self, simple_price_series):
+        """
+        Verify moving average doesn't use future data.
+
+        Critical test: at time t, MA should only use data from [t-window, t].
+        """
+        from data.features import compute_moving_average
+
+        prices = simple_price_series
+        ma = compute_moving_average(prices, window=5)
+
+        # At t=10, MA should be mean(prices[6:11])
+        # pandas rolling includes current point, so it's [10-5+1, 10] = [6, 10]
+        t = 10
+        expected_ma = prices.iloc[t - 4 : t + 1].mean()
+        actual_ma = ma.iloc[t]
+
+        np.testing.assert_allclose(actual_ma, expected_ma)
+
+    def test_no_leakage_volatility(self):
+        """
+        Verify volatility uses only past returns (not future).
+        """
+        from data.features import compute_returns, compute_rolling_volatility
+
+        dates = pd.date_range("2023-01-01", periods=50, freq="D")
+        # Create returns with known std
+        returns_values = np.random.normal(0, 0.01, 50)
+        returns = pd.Series(returns_values, index=dates)
+
+        vol = compute_rolling_volatility(returns, window=20)
+
+        # At t=25, vol should use returns[6:26] (window=20)
+        t = 25
+        window = 20
+        expected_vol = returns.iloc[t - window + 1 : t + 1].std() * np.sqrt(252)
+        actual_vol = vol.iloc[t]
+
+        np.testing.assert_allclose(actual_vol, expected_vol)
+
+    def test_no_leakage_momentum(self):
+        """
+        Verify momentum uses only past data.
+        """
+        from data.features import compute_momentum
+
+        prices = pd.Series([100, 101, 102, 103, 104], index=range(5))
+
+        momentum = compute_momentum(prices, window=2)
+
+        # At t=4, momentum = (104 - 102) / 102
+        expected = (104 - 102) / 102
+        actual = momentum.iloc[4]
+
+        np.testing.assert_allclose(actual, expected)
+
+    def test_feature_engineering_shape(self):
+        """Test that feature engineering produces correct output shape."""
+        from data.features import engineer_features
+
+        dates = pd.date_range("2023-01-01", periods=50, freq="D")
+        # Single asset, MultiIndex columns
+        data = pd.DataFrame(
+            {
+                ("SPY", "Open"): np.random.uniform(100, 110, 50),
+                ("SPY", "Close"): np.random.uniform(100, 110, 50),
+                ("SPY", "Volume"): np.random.uniform(1e6, 2e6, 50),
+                ("SPY", "High"): np.random.uniform(110, 120, 50),
+                ("SPY", "Low"): np.random.uniform(90, 100, 50),
+                ("SPY", "Adj Close"): np.random.uniform(100, 110, 50),
+            },
+            index=dates,
+        )
+        data.columns = pd.MultiIndex.from_tuples(data.columns)
+
+        engineered = engineer_features(data)
+
+        # Should have more features than input
+        assert engineered.shape[1] > data.shape[1]
+        # Same number of rows
+        assert engineered.shape[0] == data.shape[0]
+        # Should have returns, volatility, MA, momentum columns
+        col_names = [col[1] for col in engineered.columns]
+        assert "returns_log" in col_names
+        assert "volatility_20" in col_names
+        assert "ma_5" in col_names
+
+
 def test_no_future_leakage_in_rolling_window():
     """Verify rolling windows don't include future information."""
-    # This will be tested in Phase 4 (dataset.py)
+    # Tested in TestFeatures above
     pass
 
 
