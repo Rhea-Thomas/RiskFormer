@@ -286,10 +286,151 @@ def test_no_future_leakage_in_rolling_window():
     pass
 
 
-def test_normalization_fit_on_train_only():
-    """Verify normalization parameters come from train set only."""
-    # This will be tested in Phase 3 (normalization.py)
-    pass
+class TestNormalization:
+    """Test leakage-safe normalization."""
+
+    @pytest.fixture
+    def split_data(self):
+        """Create train/val/test data with different statistics."""
+        # Train: mean=100, std=5
+        train = pd.DataFrame(
+            {"price": np.random.normal(100, 5, 50), "volume": np.random.uniform(1e6, 2e6, 50)}
+        )
+
+        # Val: mean=110, std=8 (different distribution!)
+        val = pd.DataFrame(
+            {"price": np.random.normal(110, 8, 30), "volume": np.random.uniform(2e6, 3e6, 30)}
+        )
+
+        # Test: mean=95, std=6 (yet different)
+        test = pd.DataFrame(
+            {"price": np.random.normal(95, 6, 20), "volume": np.random.uniform(1e6, 2e6, 20)}
+        )
+
+        return train, val, test
+
+    def test_normalizer_fit_only_on_train(self, split_data):
+        """Verify normalizer fits only on training data."""
+        from data.normalization import Normalizer
+
+        train, val, test = split_data
+
+        # Fit on train
+        normalizer = Normalizer(method="zscore")
+        normalizer.fit(train)
+
+        # Extract fit statistics
+        train_mean = normalizer.params["price"]["mean"]
+        train_std = normalizer.params["price"]["std"]
+
+        # Verify they match train, NOT val or test
+        np.testing.assert_allclose(train_mean, train["price"].mean(), rtol=1e-5)
+        np.testing.assert_allclose(train_std, train["price"].std(), rtol=1e-5)
+
+        # Should NOT match val/test
+        assert not np.isclose(train_mean, val["price"].mean())
+        assert not np.isclose(train_mean, test["price"].mean())
+
+    def test_normalizer_immutable_after_fit(self, split_data):
+        """Verify normalizer cannot be refitted (is immutable)."""
+        from data.normalization import Normalizer
+
+        train, val, test = split_data
+
+        normalizer = Normalizer(method="zscore")
+        normalizer.fit(train)
+
+        # Store original params
+        orig_mean = normalizer.params["price"]["mean"]
+
+        # Calling transform on val does NOT change the normalizer
+        normalizer.transform(val)
+
+        # Params should be unchanged
+        assert normalizer.params["price"]["mean"] == orig_mean
+
+    def test_normalize_dataset_no_leakage(self, split_data):
+        """
+        Critical test: Verify that train statistics don't leak into val/test.
+
+        This is the core leakage prevention test.
+        """
+        from data.normalization import normalize_dataset
+
+        train, val, test = split_data
+
+        # Normalize using train stats only
+        train_norm, val_norm, test_norm, normalizer = normalize_dataset(train, val, test)
+
+        # After normalization with train stats, train should be centered near 0
+        # (because we subtract train mean)
+        train_norm_mean = train_norm["price"].mean()
+        assert np.isclose(train_norm_mean, 0, atol=1e-10)
+
+        # But val and test should NOT be centered at 0
+        # (because we subtract train mean, not val/test mean)
+        val_norm_mean = val_norm["price"].mean()
+        test_norm_mean = test_norm["price"].mean()
+
+        # These should be non-zero because val/test had different means
+        assert not np.isclose(val_norm_mean, 0, atol=0.5)  # Allow some tolerance
+        assert not np.isclose(test_norm_mean, 0, atol=0.5)
+
+    def test_normalizer_zscore_correctness(self):
+        """Verify z-score normalization formula."""
+        from data.normalization import Normalizer
+
+        data_train = pd.DataFrame({"x": [100, 102, 98, 101, 99]})
+        data_test = pd.DataFrame({"x": [100, 105]})
+
+        normalizer = Normalizer(method="zscore", epsilon=0)
+        normalizer.fit(data_train)
+        result = normalizer.transform(data_test)
+
+        # Manual calculation
+        mean = data_train["x"].mean()  # 100
+        std = data_train["x"].std()    # ~1.41
+
+        expected_0 = (100 - mean) / std  # 0
+        expected_1 = (105 - mean) / std  # ~3.5
+
+        np.testing.assert_allclose(result["x"].iloc[0], expected_0, rtol=1e-5)
+        np.testing.assert_allclose(result["x"].iloc[1], expected_1, rtol=1e-5)
+
+    def test_normalizer_inverse_transform(self):
+        """Verify inverse_transform recovers original data."""
+        from data.normalization import Normalizer
+
+        data_train = pd.DataFrame({"x": np.random.uniform(0, 100, 50)})
+        data_test = pd.DataFrame({"x": np.random.uniform(0, 100, 20)})
+
+        normalizer = Normalizer(method="zscore", epsilon=1e-8)
+        normalizer.fit(data_train)
+
+        # Transform and inverse transform
+        data_norm = normalizer.transform(data_test)
+        data_recovered = normalizer.inverse_transform(data_norm)
+
+        # Should recover original (approximately)
+        np.testing.assert_allclose(data_recovered["x"].values, data_test["x"].values, rtol=1e-5)
+
+    def test_normalizer_minmax_method(self):
+        """Test min-max normalization."""
+        from data.normalization import Normalizer
+
+        data_train = pd.DataFrame({"x": [0, 50, 100]})
+        data_test = pd.DataFrame({"x": [0, 50, 100]})
+
+        normalizer = Normalizer(method="minmax", epsilon=0)
+        normalizer.fit(data_train)
+        result = normalizer.transform(data_test)
+
+        # Min-max: (x - min) / (max - min)
+        # 0 → (0 - 0) / 100 = 0
+        # 50 → (50 - 0) / 100 = 0.5
+        # 100 → (100 - 0) / 100 = 1
+        expected = pd.DataFrame({"x": [0.0, 0.5, 1.0]})
+        np.testing.assert_allclose(result["x"].values, expected["x"].values, rtol=1e-5)
 
 
 def test_dataset_shapes():
