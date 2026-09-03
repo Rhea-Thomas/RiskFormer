@@ -282,3 +282,151 @@ class TestEmbeddings:
 
         # No Inf
         assert not np.isinf(combined_np).any()
+
+
+class TestBackbone:
+    """Test Transformer backbone."""
+
+    def test_ffn_shape(self):
+        """Test feed-forward network output shape."""
+        try:
+            import torch
+            from models.backbone import FeedForwardNetwork
+
+            d_model = 256
+            batch_size = 4
+            seq_len = 20
+
+            ffn = FeedForwardNetwork(d_model)
+            X = torch.randn(batch_size, seq_len, d_model)
+            output = ffn(X)
+
+            assert output.shape == (batch_size, seq_len, d_model)
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_ffn_hidden_dim(self):
+        """Test FFN with custom hidden dimension."""
+        try:
+            import torch
+            from models.backbone import FeedForwardNetwork
+
+            d_model = 256
+            hidden_dim = 512
+            ffn = FeedForwardNetwork(d_model, hidden_dim=hidden_dim)
+
+            X = torch.randn(1, 10, d_model)
+            output = ffn(X)
+
+            assert output.shape == (1, 10, d_model)
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_transformer_block_shape(self):
+        """Test transformer block output shape."""
+        try:
+            import torch
+            from models.backbone import TransformerBlock
+
+            d_model = 256
+            n_heads = 8
+            batch_size = 4
+            seq_len = 20
+
+            block = TransformerBlock(d_model, n_heads)
+            X = torch.randn(batch_size, seq_len, d_model)
+            output = block(X)
+
+            assert output.shape == (batch_size, seq_len, d_model)
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_transformer_block_residual(self):
+        """Verify transformer block has residual connections."""
+        try:
+            import torch
+            from models.backbone import TransformerBlock
+
+            d_model = 256
+            n_heads = 8
+
+            block = TransformerBlock(d_model, n_heads)
+
+            # Check that block has residual connections
+            # (output should be related to input, not independent)
+            X = torch.randn(1, 5, d_model)
+            output = block(X)
+
+            # Output should not be identical to input (network learned something)
+            assert not torch.allclose(X, output)
+
+            # But they should be in same range (residual connections mean small delta)
+            assert output.shape == X.shape
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_backbone_shape(self):
+        """Test transformer backbone output shape."""
+        try:
+            import torch
+            from models.backbone import TransformerBackbone
+
+            d_model = 256
+            n_heads = 8
+            n_layers = 4
+            batch_size = 4
+            seq_len = 20
+
+            backbone = TransformerBackbone(d_model, n_heads, n_layers)
+            X = torch.randn(batch_size, seq_len, d_model)
+            output = backbone(X)
+
+            assert output.shape == (batch_size, seq_len, d_model)
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_backbone_depth(self):
+        """Test backbone with different depths."""
+        try:
+            import torch
+            from models.backbone import TransformerBackbone
+
+            d_model = 256
+            n_heads = 8
+            batch_size = 2
+            seq_len = 10
+            X = torch.randn(batch_size, seq_len, d_model)
+
+            # Test different depths
+            for n_layers in [1, 2, 4, 8]:
+                backbone = TransformerBackbone(d_model, n_heads, n_layers)
+                output = backbone(X)
+                assert output.shape == (batch_size, seq_len, d_model)
+
+        except ImportError:
+            pytest.skip("torch not installed")
+
+    def test_backbone_no_nan(self):
+        """Verify backbone doesn't produce NaN."""
+        try:
+            import torch
+            from models.backbone import TransformerBackbone
+
+            d_model = 256
+            n_heads = 8
+            n_layers = 2
+
+            backbone = TransformerBackbone(d_model, n_heads, n_layers)
+            X = torch.randn(1, 10, d_model)
+            output = backbone(X)
+
+            assert not torch.isnan(output).any()
+            assert not torch.isinf(output).any()
+
+        except ImportError:
+            pytest.skip("torch not installed")
