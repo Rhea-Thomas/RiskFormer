@@ -104,6 +104,18 @@ class TestDataIngestion:
         is_valid, report = validate_market_data(sample_data)
         assert not is_valid
 
+    def test_validate_multi_asset_dict(self, sample_data):
+        """
+        Regression test: Ensure validation works with multiple assets in dict.
+
+        This catches the bug where yfinance multi-ticker returns MultiIndex columns,
+        causing ambiguous truth values on Series/DataFrame comparisons.
+        """
+        # Validate all assets at once (as a dict, like yfinance.download returns)
+        is_valid, report = validate_market_data(sample_data)
+        assert is_valid
+        assert all(v == "OK" for v in report.values())
+
 
 def test_no_future_leakage_in_rolling_window():
     """Verify rolling windows don't include future information."""

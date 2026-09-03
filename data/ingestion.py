@@ -99,16 +99,17 @@ def validate_market_data(data: Dict[str, pd.DataFrame]) -> Tuple[bool, Dict]:
             issues.append(f"Duplicate dates: {df.index[df.index.duplicated()].tolist()}")
 
         # Check price sanity
-        if (df["Close"] < df["Low"]).any() or (df["Close"] > df["High"]).any():
+        # Use .to_numpy().any() to handle both single-asset and multi-asset DataFrames
+        if (df["Close"] < df["Low"]).to_numpy().any() or (df["Close"] > df["High"]).to_numpy().any():
             issues.append("Close price outside High-Low range")
 
-        if (df["High"] < df["Low"]).any():
+        if (df["High"] < df["Low"]).to_numpy().any():
             issues.append("High < Low")
 
-        if (df[["Open", "High", "Low", "Close"]] <= 0).any().any():
+        if (df[["Open", "High", "Low", "Close"]] <= 0).to_numpy().any():
             issues.append("Price <= 0")
 
-        if (df["Volume"] < 0).any():
+        if (df["Volume"] < 0).to_numpy().any():
             issues.append("Volume < 0")
 
         if issues:
