@@ -1,5 +1,5 @@
 """
-Tests for models (attention, Transformer, heads).
+Tests for models module (attention, Transformer, embeddings, heads).
 
 Focus:
   - Output shape correctness
@@ -9,24 +9,189 @@ Focus:
 """
 
 import pytest
-import torch
+import numpy as np
 
 
-def test_causal_attention_shape():
-    """Verify causal attention output shape matches input."""
-    pass
+class TestEmbeddings:
+    """Test embedding module."""
 
+    def test_temporal_embedding_shapes(self):
+        """Test temporal embedding output shape."""
+        from models.embeddings import TemporalEmbedding
 
-def test_causal_masking_prevents_future():
-    """Verify causal mask prevents attending to future time steps."""
-    pass
+        d_model = 256
+        temporal_emb = TemporalEmbedding(d_model, max_len=1000)
 
+        # Get embedding for seq_len=60
+        pe = temporal_emb(seq_len=60)
 
-def test_transformer_backbone_shape():
-    """Verify Transformer backbone output shape."""
-    pass
+        # Should be (60, d_model)
+        assert pe.shape == (60, d_model)
 
+    def test_temporal_embedding_batch(self):
+        """Test temporal embedding with batch dimension."""
+        from models.embeddings import TemporalEmbedding
 
-def test_prediction_heads_shape():
-    """Verify all prediction heads produce expected output shapes."""
-    pass
+        d_model = 256
+        batch_size = 32
+        temporal_emb = TemporalEmbedding(d_model, max_len=1000)
+
+        # Get embedding with batch
+        pe = temporal_emb(seq_len=60, batch_size=batch_size)
+
+        # Should be (batch_size, 60, d_model)
+        assert pe.shape == (batch_size, 60, d_model)
+
+    def test_temporal_embedding_orthogonality(self):
+        """Verify temporal encodings are distinct (not all zeros)."""
+        from models.embeddings import TemporalEmbedding
+
+        d_model = 256
+        temporal_emb = TemporalEmbedding(d_model, max_len=1000)
+
+        pe = temporal_emb(seq_len=60)
+        pe_np = pe.numpy() if hasattr(pe, 'numpy') else pe
+
+        # Different positions should have different encodings
+        assert not np.allclose(pe_np[0], pe_np[1])
+        assert not np.allclose(pe_np[10], pe_np[20])
+
+    def test_asset_embedding_shapes(self):
+        """Test asset embedding output shape."""
+        from models.embeddings import AssetEmbedding
+
+        n_assets = 5
+        d_model = 256
+        asset_emb = AssetEmbedding(n_assets, d_model)
+
+        # Single asset
+        emb = asset_emb(0)
+        assert emb.shape[-1] == d_model
+
+        # Multiple assets
+        asset_ids = np.array([0, 1, 2])
+        emb = asset_emb(asset_ids)
+        assert emb.shape == (3, d_model)
+
+    def test_asset_embedding_distinctness(self):
+        """Verify each asset gets unique embedding."""
+        from models.embeddings import AssetEmbedding
+
+        n_assets = 3
+        d_model = 256
+        asset_emb = AssetEmbedding(n_assets, d_model)
+
+        emb0 = asset_emb(0)
+        emb1 = asset_emb(1)
+        emb2 = asset_emb(2)
+
+        emb0_np = emb0.numpy() if hasattr(emb0, 'numpy') else emb0
+        emb1_np = emb1.numpy() if hasattr(emb1, 'numpy') else emb1
+        emb2_np = emb2.numpy() if hasattr(emb2, 'numpy') else emb2
+
+        # Different assets should have different embeddings
+        assert not np.allclose(emb0_np, emb1_np)
+        assert not np.allclose(emb1_np, emb2_np)
+
+    def test_feature_embedding_shapes(self):
+        """Test feature embedding output shape."""
+        from models.embeddings import FeatureEmbedding
+
+        n_features = 19
+        d_model = 256
+        feature_emb = FeatureEmbedding(n_features, d_model)
+
+        # Single sample
+        features = np.random.randn(n_features)
+        emb = feature_emb(features)
+        assert emb.shape[-1] == d_model
+
+        # Batch of samples
+        features_batch = np.random.randn(10, n_features)
+        emb_batch = feature_emb(features_batch)
+        assert emb_batch.shape == (10, d_model)
+
+    def test_feature_embedding_projection(self):
+        """Verify feature embedding projects to lower rank."""
+        from models.embeddings import FeatureEmbedding
+
+        n_features = 19
+        d_model = 256
+        feature_emb = FeatureEmbedding(n_features, d_model)
+
+        # Different input features should produce different outputs
+        features1 = np.ones((10, n_features))
+        features2 = np.ones((10, n_features)) * 2  # Different input
+        emb1 = feature_emb(features1)
+        emb2 = feature_emb(features2)
+        emb1_np = emb1.numpy() if hasattr(emb1, 'numpy') else emb1
+        emb2_np = emb2.numpy() if hasattr(emb2, 'numpy') else emb2
+
+        # Different inputs should produce different outputs
+        assert not np.allclose(emb1_np[0], emb2_np[0])
+
+    def test_embedding_combiner_shapes(self):
+        """Test combined embedding output shape."""
+        from models.embeddings import EmbeddingCombiner
+
+        n_features = 19
+        n_assets = 3
+        d_model = 256
+        lookback = 60
+
+        combiner = EmbeddingCombiner(n_features, n_assets, d_model)
+
+        # Create input
+        X = np.random.randn(lookback, n_assets, n_features)
+
+        # Combine embeddings
+        combined = combiner(X)
+
+        # Should be (lookback, n_assets, d_model)
+        assert combined.shape == (lookback, n_assets, d_model)
+
+    def test_embedding_combiner_batch(self):
+        """Test combined embedding with batch."""
+        from models.embeddings import EmbeddingCombiner
+
+        batch_size = 32
+        n_features = 19
+        n_assets = 3
+        d_model = 256
+        lookback = 60
+
+        combiner = EmbeddingCombiner(n_features, n_assets, d_model)
+
+        # Create input with batch
+        X = np.random.randn(batch_size, lookback, n_assets, n_features)
+
+        # Combine embeddings
+        combined = combiner(X)
+
+        # Should be (batch_size, lookback, n_assets, d_model)
+        assert combined.shape == (batch_size, lookback, n_assets, d_model)
+
+    def test_embedding_combiner_no_nan(self):
+        """Verify embeddings don't produce NaN."""
+        from models.embeddings import EmbeddingCombiner
+
+        n_features = 19
+        n_assets = 3
+        d_model = 256
+        lookback = 60
+
+        combiner = EmbeddingCombiner(n_features, n_assets, d_model)
+
+        # Create input
+        X = np.random.randn(lookback, n_assets, n_features)
+
+        # Combine embeddings
+        combined = combiner(X)
+
+        combined_np = combined.numpy() if hasattr(combined, 'numpy') else combined
+
+        # No NaN
+        assert not np.isnan(combined_np).any()
+
+        # No Inf
+        assert not np.isinf(combined_np).any()
