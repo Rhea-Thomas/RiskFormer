@@ -13,3 +13,11 @@ Key:
   - Account for transaction costs, slippage, and market impact
   - Proper backtesting is complex; keep it simple to avoid pitfalls
 """
+
+from backtesting.engine import (  # noqa: F401
+    backtest_forecasts,
+    make_weights,
+    performance_metrics,
+    risk_attribution,
+    run_backtest,
+)
