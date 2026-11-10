@@ -137,7 +137,7 @@ class TestEmbeddings:
         temporal_emb = TemporalEmbedding(d_model, max_len=1000)
 
         pe = temporal_emb(seq_len=60)
-        pe_np = pe.numpy() if hasattr(pe, 'numpy') else pe
+        pe_np = pe.detach().numpy() if hasattr(pe, 'detach') else pe
 
         # Different positions should have different encodings
         assert not np.allclose(pe_np[0], pe_np[1])
@@ -172,9 +172,9 @@ class TestEmbeddings:
         emb1 = asset_emb(1)
         emb2 = asset_emb(2)
 
-        emb0_np = emb0.numpy() if hasattr(emb0, 'numpy') else emb0
-        emb1_np = emb1.numpy() if hasattr(emb1, 'numpy') else emb1
-        emb2_np = emb2.numpy() if hasattr(emb2, 'numpy') else emb2
+        emb0_np = emb0.detach().numpy() if hasattr(emb0, 'detach') else emb0
+        emb1_np = emb1.detach().numpy() if hasattr(emb1, 'detach') else emb1
+        emb2_np = emb2.detach().numpy() if hasattr(emb2, 'detach') else emb2
 
         # Different assets should have different embeddings
         assert not np.allclose(emb0_np, emb1_np)
@@ -211,8 +211,8 @@ class TestEmbeddings:
         features2 = np.ones((10, n_features)) * 2  # Different input
         emb1 = feature_emb(features1)
         emb2 = feature_emb(features2)
-        emb1_np = emb1.numpy() if hasattr(emb1, 'numpy') else emb1
-        emb2_np = emb2.numpy() if hasattr(emb2, 'numpy') else emb2
+        emb1_np = emb1.detach().numpy() if hasattr(emb1, 'detach') else emb1
+        emb2_np = emb2.detach().numpy() if hasattr(emb2, 'detach') else emb2
 
         # Different inputs should produce different outputs
         assert not np.allclose(emb1_np[0], emb2_np[0])
@@ -275,7 +275,7 @@ class TestEmbeddings:
         # Combine embeddings
         combined = combiner(X)
 
-        combined_np = combined.numpy() if hasattr(combined, 'numpy') else combined
+        combined_np = combined.detach().numpy() if hasattr(combined, 'detach') else combined
 
         # No NaN
         assert not np.isnan(combined_np).any()

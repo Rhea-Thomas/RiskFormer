@@ -145,6 +145,9 @@ class AssetEmbedding:
         if HAS_TORCH:
             if isinstance(asset_ids, np.ndarray):
                 asset_ids = torch.from_numpy(asset_ids).long()
+            elif not isinstance(asset_ids, torch.Tensor):
+                # scalar int or list of ints
+                asset_ids = torch.as_tensor(asset_ids, dtype=torch.long)
             return self.embedding(asset_ids)
         else:
             # Numpy version
