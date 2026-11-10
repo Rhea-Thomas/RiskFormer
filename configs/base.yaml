@@ -1,43 +1,48 @@
 # RiskFormer Base Configuration
 # This file establishes default hyperparameters and settings.
-# Override via command-line or environment variables.
+# Override via command-line flags in train.py / evaluate.py.
 
 # Data configuration
 data:
-  assets: ["SPY", "QQQ", "IWM"]  # Placeholder assets
+  assets: ["SPY", "QQQ", "IWM"]  # S&P 500, Nasdaq-100, Russell 2000 ETFs
+  # Stationary features only (see data/pipeline.py). Price levels are
+  # expressed as ratios so z-scores stay meaningful out of sample.
   features:
-    - close
-    - volume
     - returns_log
+    - volatility_5
     - volatility_20
-    - returns_ma_5
+    - momentum_5
+    - momentum_20
+    - momentum_60
+    - price_to_ma_20
+    - price_to_ma_60
+    - hl_range
+    - vol_change_5
+    - vol_change_20
   lookback_window: 60  # Historical context length (days)
   forecast_horizon: 1  # Predict 1 day ahead
+  vol_horizon: 5       # Forward realized-vol target window (days)
   train_start_date: "2015-01-01"
   train_end_date: "2021-12-31"
   val_start_date: "2022-01-01"
   val_end_date: "2022-12-31"
   test_start_date: "2023-01-01"
-  test_end_date: "2023-12-31"
+  test_end_date: "2025-12-31"   # 3 years out of sample
 
 # Normalization (applied only on training data, propagated forward)
 normalization:
   method: "zscore"  # zscore or minmax
   epsilon: 1.0e-8
 
-# Embedding configuration
-embeddings:
-  temporal_dim: 32
-  asset_dim: 16
-  feature_dim: 64
-
 # Transformer backbone
+# Deliberately small: ~1.7k training windows of daily data cannot support a
+# 256-d / 4-layer model without heavy overfitting.
 transformer:
-  d_model: 256
-  n_heads: 8
-  n_layers: 4
-  d_ff: 512
-  dropout: 0.1
+  d_model: 64
+  n_heads: 4
+  n_layers: 2
+  d_ff: 128
+  dropout: 0.2
   activation: "relu"
   causal: true
 
@@ -46,38 +51,46 @@ heads:
   return_prediction: true
   volatility_prediction: true
   quantile_regression: true
-  regime_classification: false
+  direction_classification: true
+  quantiles: [0.05, 0.5, 0.95]
 
 # Training
 training:
-  batch_size: 32
-  learning_rate: 1.0e-3
-  optimizer: "adam"
-  max_epochs: 50
-  weight_decay: 1.0e-4
-  early_stopping_patience: 5
+  batch_size: 64
+  learning_rate: 5.0e-4
+  optimizer: "adamw"
+  max_epochs: 40
+  weight_decay: 1.0e-2
+  warmup_epochs: 2
+  grad_clip: 1.0
+  early_stopping_patience: 8
 
 # Loss weights (for multi-task learning)
 losses:
-  return_weight: 1.0
-  volatility_weight: 0.5
-  quantile_weight: 0.5
+  return_weight: 1.0      # Gaussian NLL on next-day return (uses μ and σ)
+  volatility_weight: 0.5  # log-MSE of σ vs forward realized vol
+  quantile_weight: 0.5    # pinball loss
+  direction_weight: 0.1   # BCE on up/down
   regime_weight: 0.0
+  learn_weights: false
 
 # Evaluation
 evaluation:
-  walk_forward_steps: 10
+  walk_forward_steps: 12      # quarterly refits through the 3 test years
+  walk_forward_epochs: 10     # fine-tune epochs per refit
   metrics:
     - mae
     - rmse
     - directional_accuracy
     - correlation
 
-# Backtesting (future phase)
+# Backtesting
 backtesting:
   initial_capital: 100000.0
-  transaction_cost: 0.001  # 10 bps
+  transaction_cost: 0.001  # 10 bps per unit of turnover
   rebalance_frequency: "daily"
+  target_vol: 10.0         # annualized % portfolio volatility target
+  max_leverage: 1.5
 
 # System
 system:
