@@ -56,6 +56,11 @@ def download_market_data(assets: List[str], start_date: str, end_date: str) -> D
             logger.warning(f"No data found for {asset}")
             continue
 
+        # yfinance >= 0.2.40 returns (Price, Ticker) MultiIndex columns even for
+        # a single ticker; flatten to plain OHLCV so align_assets builds (asset, field)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
         # Ensure index is DatetimeIndex
         if not isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index)
